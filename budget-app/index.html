@@ -508,8 +508,13 @@
   <script>
     // --- State ---
     // data[dateStr] = { spent: [...{amount, desc, time}], rolloverIn: number }
-    let data    = JSON.parse(localStorage.getItem('budget_data') || '{}');
-    let DAILY   = parseFloat(localStorage.getItem('budget_daily') || '45');
+    // Safe localStorage wrapper (file:// protocol blocks it on iOS)
+    const store = {
+      get(k, fb) { try { return localStorage.getItem(k) ?? fb; } catch { return fb; } },
+      set(k, v)  { try { localStorage.setItem(k, v); } catch {} }
+    };
+    let data    = JSON.parse(store.get('budget_data', '{}'));
+    let DAILY   = parseFloat(store.get('budget_daily', '45'));
     let viewOffset = 0; // 0 = today, -1 = yesterday, etc.
 
     // --- Date helpers ---
@@ -564,7 +569,7 @@
     }
 
     function save() {
-      localStorage.setItem('budget_data', JSON.stringify(data));
+      store.set('budget_data', JSON.stringify(data));
     }
 
     // --- UI ---
@@ -726,7 +731,7 @@
       const val   = parseFloat(input.value);
       if (!val || val <= 0) { showToast('Enter a valid daily amount.'); return; }
       DAILY = val;
-      localStorage.setItem('budget_daily', val);
+      store.set('budget_daily', val);
       // Recompute rollovers with new daily value
       computeRollovers();
       save();
