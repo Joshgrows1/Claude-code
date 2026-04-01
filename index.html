@@ -413,6 +413,50 @@
     }
 
     .btn-ghost:hover { border-color: var(--accent); color: var(--accent-light); }
+
+    /* Month nav (reuses .day-nav styles) */
+    .month-nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .month-nav span {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--text);
+      flex: 1;
+      text-align: center;
+    }
+
+    .monthly-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+
+    .month-stat {
+      background: var(--surface2);
+      border-radius: 8px;
+      padding: 12px 10px;
+      text-align: center;
+    }
+
+    .month-stat-value {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .month-stat-label {
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--muted);
+      margin-top: 3px;
+    }
   </style>
 </head>
 <body>
@@ -453,11 +497,49 @@
       </div>
       <div class="strip-item">
         <div class="strip-value" id="strip-saved" style="color:var(--green)">$0.00</div>
-        <div class="strip-label">Total saved</div>
+        <div class="strip-label">Rolled over</div>
       </div>
       <div class="strip-item">
         <div class="strip-value" id="strip-total-spent">$0.00</div>
         <div class="strip-label">Total spent</div>
+      </div>
+    </div>
+
+    <!-- Monthly summary -->
+    <div class="card">
+      <div class="month-nav">
+        <button class="btn-nav" id="btn-month-prev" onclick="changeMonth(-1)">&#8592;</button>
+        <span id="month-label">This Month</span>
+        <button class="btn-nav" id="btn-month-next" onclick="changeMonth(1)" disabled>&#8594;</button>
+      </div>
+      <div class="monthly-grid">
+        <div class="month-stat">
+          <div class="month-stat-value" id="month-spent">$0.00</div>
+          <div class="month-stat-label">Spent</div>
+        </div>
+        <div class="month-stat">
+          <div class="month-stat-value" id="month-budget" style="color:var(--accent-light)">$0.00</div>
+          <div class="month-stat-label">Budget</div>
+        </div>
+        <div class="month-stat">
+          <div class="month-stat-value" id="month-remaining">$0.00</div>
+          <div class="month-stat-label">Remaining</div>
+        </div>
+        <div class="month-stat">
+          <div class="month-stat-value" id="month-days-active">0</div>
+          <div class="month-stat-label">Days active</div>
+        </div>
+        <div class="month-stat">
+          <div class="month-stat-value" id="month-avg">$0.00</div>
+          <div class="month-stat-label">Avg/day</div>
+        </div>
+        <div class="month-stat">
+          <div class="month-stat-value" id="month-saved">$0.00</div>
+          <div class="month-stat-label">Saved</div>
+        </div>
+      </div>
+      <div class="progress-wrap" style="margin-top:14px">
+        <div class="progress-bar" id="month-progress" style="width:0%;background:var(--green)"></div>
       </div>
     </div>
 
@@ -515,7 +597,8 @@
     };
     let data    = JSON.parse(store.get('budget_data', '{}'));
     let DAILY   = parseFloat(store.get('budget_daily', '45'));
-    let viewOffset = 0; // 0 = today, -1 = yesterday, etc.
+    let viewOffset = 0;   // 0 = today, -1 = yesterday, etc.
+    let monthOffset = 0;  // 0 = current month, -1 = last month, etc.
 
     // --- Date helpers ---
     function dateStr(offset = 0) {
@@ -674,6 +757,8 @@
           ${isToday ? `<button class="btn btn-danger" onclick="deleteExpense(${i})">✕</button>` : ''}`;
         list.appendChild(el);
       });
+
+      renderMonth();
     }
 
     function fmt(n) {
@@ -712,6 +797,67 @@
       data[today].spent.splice(idx, 1);
       save();
       render();
+    }
+
+    function changeMonth(dir) {
+      const now = new Date();
+      const target = new Date(now.getFullYear(), now.getMonth() + monthOffset + dir, 1);
+      // Don't go into the future
+      if (target > new Date(now.getFullYear(), now.getMonth(), 1)) return;
+      monthOffset += dir;
+      render();
+    }
+
+    function renderMonth() {
+      const now = new Date();
+      const year  = now.getFullYear();
+      const month = now.getMonth() + monthOffset; // can go negative; Date handles it
+      const d = new Date(year, month, 1);
+      const monthStr = d.toISOString().slice(0, 7); // YYYY-MM
+      const isCurrentMonth = monthOffset === 0;
+
+      // Label
+      const label = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      document.getElementById('month-label').textContent = isCurrentMonth ? 'This Month' : label;
+
+      // Nav buttons
+      document.getElementById('btn-month-next').disabled = isCurrentMonth;
+      const allDates = allDatesAsc();
+      const earliestMonth = allDates.length ? allDates[0].slice(0, 7) : monthStr;
+      document.getElementById('btn-month-prev').disabled = monthStr <= earliestMonth;
+
+      // Compute stats for this month
+      const monthKeys = Object.keys(data).filter(k => k.startsWith(monthStr));
+      const daysInMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+      const daysPassed  = isCurrentMonth
+        ? now.getDate()
+        : daysInMonth;
+
+      let monthSpent = 0;
+      for (const k of monthKeys) {
+        monthSpent += (data[k].spent || []).reduce((s, t) => s + t.amount, 0);
+      }
+
+      const monthBudget    = DAILY * daysPassed;
+      const monthRemaining = Math.max(0, monthBudget - monthSpent);
+      const daysActive     = monthKeys.filter(k => (data[k].spent || []).length > 0).length;
+      const avgPerDay      = daysActive > 0 ? monthSpent / daysActive : 0;
+      const saved          = Math.max(0, monthBudget - monthSpent);
+      const pct            = Math.min(100, monthBudget > 0 ? (monthSpent / monthBudget) * 100 : 0);
+
+      document.getElementById('month-spent').textContent     = fmt(monthSpent);
+      document.getElementById('month-spent').style.color     = monthSpent > monthBudget ? 'var(--red)' : 'var(--text)';
+      document.getElementById('month-budget').textContent    = fmt(monthBudget);
+      document.getElementById('month-remaining').textContent = fmt(monthRemaining);
+      document.getElementById('month-remaining').style.color = monthRemaining > 0 ? 'var(--green)' : 'var(--red)';
+      document.getElementById('month-days-active').textContent = daysActive;
+      document.getElementById('month-avg').textContent       = fmt(avgPerDay);
+      document.getElementById('month-saved').textContent     = fmt(saved);
+      document.getElementById('month-saved').style.color     = saved > 0 ? 'var(--green)' : 'var(--muted)';
+
+      const bar = document.getElementById('month-progress');
+      bar.style.width = pct + '%';
+      bar.style.background = pct < 60 ? 'var(--green)' : pct < 90 ? 'var(--yellow)' : 'var(--red)';
     }
 
     function changeDay(dir) {
