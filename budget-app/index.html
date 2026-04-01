@@ -369,11 +369,42 @@
       margin-left: 6px;
       vertical-align: middle;
     }
+
+    /* Settings row */
+    .settings-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .settings-row label {
+      font-size: 0.75rem;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .settings-row input[type="number"] {
+      max-width: 100px;
+    }
+
+    .btn-ghost {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 6px 12px;
+      font-size: 0.78rem;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: border-color 0.2s, color 0.2s;
+    }
+
+    .btn-ghost:hover { border-color: var(--accent); color: var(--accent-light); }
   </style>
 </head>
 <body>
   <h1>Daily Budget</h1>
-  <p class="subtitle">$45 / day &mdash; unused rolls over</p>
+  <p class="subtitle" id="subtitle">$45 / day &mdash; unused rolls over</p>
 
   <div class="app">
     <!-- Balance card -->
@@ -417,6 +448,18 @@
       </div>
     </div>
 
+    <!-- Settings -->
+    <div class="card">
+      <div class="card-title">Settings</div>
+      <div class="settings-row">
+        <label for="daily-input">Daily budget ($)</label>
+        <input type="number" id="daily-input" min="1" step="0.01" placeholder="45.00" style="max-width:100px" />
+        <button class="btn btn-primary" onclick="saveDaily()" style="padding:10px 16px;font-size:0.85rem">Save</button>
+        <button class="btn btn-ghost" onclick="cancelDailyEdit()" id="btn-cancel-daily" style="display:none">Cancel</button>
+      </div>
+      <p style="font-size:0.72rem;color:var(--muted);margin-top:10px" id="daily-note"></p>
+    </div>
+
     <!-- Add expense -->
     <div class="card">
       <div class="card-title">Add Expense</div>
@@ -450,11 +493,10 @@
   <div class="toast" id="toast"></div>
 
   <script>
-    const DAILY = 45;
-
     // --- State ---
     // data[dateStr] = { spent: [...{amount, desc, time}], rolloverIn: number }
-    let data = JSON.parse(localStorage.getItem('budget_data') || '{}');
+    let data    = JSON.parse(localStorage.getItem('budget_data') || '{}');
+    let DAILY   = parseFloat(localStorage.getItem('budget_daily') || '45');
     let viewOffset = 0; // 0 = today, -1 = yesterday, etc.
 
     // --- Date helpers ---
@@ -518,6 +560,16 @@
     function render() {
       const today = dateStr(0);
       computeRollovers();
+
+      // Keep settings input in sync (only if user isn't actively editing it)
+      const dailyInput = document.getElementById('daily-input');
+      if (document.activeElement !== dailyInput) {
+        dailyInput.value = DAILY.toFixed(2);
+        document.getElementById('btn-cancel-daily').style.display = 'none';
+      }
+      document.getElementById('subtitle').textContent = `${fmt(DAILY)} / day — unused rolls over`;
+      document.getElementById('daily-note').textContent =
+        'Changing this affects all future rollovers recalculated from your history.';
 
       const key = getViewDate();
       if (!data[key]) data[key] = { spent: [], rolloverIn: 0 };
@@ -654,6 +706,37 @@
 
       render();
     }
+
+    // --- Daily budget settings ---
+    function saveDaily() {
+      const input = document.getElementById('daily-input');
+      const val   = parseFloat(input.value);
+      if (!val || val <= 0) { showToast('Enter a valid daily amount.'); return; }
+      DAILY = val;
+      localStorage.setItem('budget_daily', val);
+      // Recompute rollovers with new daily value
+      computeRollovers();
+      save();
+      render();
+      showToast(`Daily budget set to ${fmt(DAILY)}`);
+    }
+
+    function cancelDailyEdit() {
+      document.getElementById('daily-input').value = DAILY.toFixed(2);
+      document.getElementById('btn-cancel-daily').style.display = 'none';
+    }
+
+    // Show cancel button when user edits the field
+    document.getElementById('daily-input').addEventListener('input', () => {
+      const cur = parseFloat(document.getElementById('daily-input').value);
+      document.getElementById('btn-cancel-daily').style.display =
+        (cur !== DAILY) ? 'inline-flex' : 'none';
+    });
+
+    document.getElementById('daily-input').addEventListener('keydown', e => {
+      if (e.key === 'Enter') saveDaily();
+      if (e.key === 'Escape') cancelDailyEdit();
+    });
 
     // --- Enter key on inputs ---
     document.getElementById('amount-input').addEventListener('keydown', e => { if (e.key === 'Enter') addExpense(); });
