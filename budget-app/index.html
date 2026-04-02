@@ -414,6 +414,43 @@
 
     .btn-ghost:hover { border-color: var(--accent); color: var(--accent-light); }
 
+    /* Alert banner */
+    .alert-banner {
+      background: #2e1a05;
+      border: 1px solid var(--yellow);
+      border-radius: var(--radius);
+      padding: 12px 16px;
+      font-size: 0.85rem;
+      color: var(--yellow);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      animation: fadeIn 0.3s ease;
+    }
+
+    /* Weekly stats grid */
+    .weekly-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+
+    .week-stat {
+      background: var(--surface2);
+      border-radius: 8px;
+      padding: 12px 10px;
+      text-align: center;
+    }
+
+    .week-stat-value { font-size: 1rem; font-weight: 700; color: var(--text); }
+    .week-stat-label {
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--muted);
+      margin-top: 3px;
+    }
+
     /* Month nav (reuses .day-nav styles) */
     .month-nav {
       display: flex;
@@ -505,6 +542,45 @@
       </div>
     </div>
 
+    <!-- Over-budget alert -->
+    <div class="alert-banner" id="alert-banner" style="display:none">
+      ⚠️ <span id="alert-text"></span>
+    </div>
+
+    <!-- Weekly summary -->
+    <div class="card">
+      <div class="card-title">This Week</div>
+      <div class="weekly-grid">
+        <div class="week-stat">
+          <div class="week-stat-value" id="week-spent">$0.00</div>
+          <div class="week-stat-label">Spent</div>
+        </div>
+        <div class="week-stat">
+          <div class="week-stat-value" id="week-budget" style="color:var(--accent-light)">$0.00</div>
+          <div class="week-stat-label">Budget</div>
+        </div>
+        <div class="week-stat">
+          <div class="week-stat-value" id="week-remaining">$0.00</div>
+          <div class="week-stat-label">Remaining</div>
+        </div>
+        <div class="week-stat">
+          <div class="week-stat-value" id="week-days-active">0</div>
+          <div class="week-stat-label">Days active</div>
+        </div>
+        <div class="week-stat">
+          <div class="week-stat-value" id="week-avg">$0.00</div>
+          <div class="week-stat-label">Avg/day</div>
+        </div>
+        <div class="week-stat">
+          <div class="week-stat-value" id="week-saved">$0.00</div>
+          <div class="week-stat-label">Saved</div>
+        </div>
+      </div>
+      <div class="progress-wrap" style="margin-top:12px">
+        <div class="progress-bar" id="week-progress" style="width:0%;background:var(--green)"></div>
+      </div>
+    </div>
+
     <!-- Monthly summary -->
     <div class="card">
       <div class="month-nav">
@@ -552,6 +628,19 @@
         <button class="btn btn-primary" onclick="saveDaily()" style="padding:10px 16px;font-size:0.85rem">Save</button>
         <button class="btn btn-ghost" onclick="cancelDailyEdit()" id="btn-cancel-daily" style="display:none">Cancel</button>
       </div>
+      <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+        <div class="card-title" style="margin-bottom:10px">Alert Threshold</div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <label style="font-size:0.75rem;color:var(--muted);white-space:nowrap">Alert when budget is</label>
+          <input type="number" id="alert-input" min="1" max="100" step="1" placeholder="e.g. 80"
+                 style="max-width:80px" />
+          <span style="font-size:0.85rem;color:var(--muted)">% used</span>
+          <button class="btn btn-primary" onclick="saveAlert()" style="padding:8px 14px;font-size:0.82rem">Save</button>
+          <button class="btn btn-ghost" onclick="clearAlert()" id="btn-clear-alert" style="display:none;padding:8px 14px;font-size:0.82rem">Off</button>
+        </div>
+        <p style="font-size:0.72rem;color:var(--muted);margin-top:8px" id="alert-note"></p>
+      </div>
+
       <p style="font-size:0.72rem;color:var(--muted);margin-top:10px" id="daily-note"></p>
     </div>
 
@@ -595,10 +684,11 @@
       get(k, fb) { try { return localStorage.getItem(k) ?? fb; } catch { return fb; } },
       set(k, v)  { try { localStorage.setItem(k, v); } catch {} }
     };
-    let data    = JSON.parse(store.get('budget_data', '{}'));
-    let DAILY   = parseFloat(store.get('budget_daily', '45'));
-    let viewOffset = 0;   // 0 = today, -1 = yesterday, etc.
-    let monthOffset = 0;  // 0 = current month, -1 = last month, etc.
+    let data       = JSON.parse(store.get('budget_data', '{}'));
+    let DAILY      = parseFloat(store.get('budget_daily', '45'));
+    let ALERT_PCT  = store.get('budget_alert') ? parseFloat(store.get('budget_alert')) : null;
+    let viewOffset  = 0;
+    let monthOffset = 0;
 
     // --- Date helpers ---
     function dateStr(offset = 0) {
@@ -758,6 +848,31 @@
         list.appendChild(el);
       });
 
+      // Alert banner (always based on today, not viewed day)
+      const todayDay   = data[today] || { spent: [], rolloverIn: 0 };
+      const todaySpent = todayDay.spent.reduce((s, t) => s + t.amount, 0);
+      const todayBudget = DAILY + todayDay.rolloverIn;
+      const todayPct   = todayBudget > 0 ? (todaySpent / todayBudget) * 100 : 0;
+      const alertEl    = document.getElementById('alert-banner');
+      if (ALERT_PCT !== null && todayPct >= ALERT_PCT) {
+        alertEl.style.display = 'flex';
+        document.getElementById('alert-text').textContent =
+          `You've used ${Math.round(todayPct)}% of today's budget.`;
+      } else {
+        alertEl.style.display = 'none';
+      }
+
+      // Sync alert settings UI
+      const alertInput = document.getElementById('alert-input');
+      if (document.activeElement !== alertInput) {
+        alertInput.value = ALERT_PCT !== null ? ALERT_PCT : '';
+      }
+      document.getElementById('btn-clear-alert').style.display = ALERT_PCT !== null ? 'inline-block' : 'none';
+      document.getElementById('alert-note').textContent = ALERT_PCT !== null
+        ? `Alert fires when ${ALERT_PCT}% of today's budget is used.`
+        : 'No alert set.';
+
+      renderWeekly();
       renderMonth();
     }
 
@@ -806,6 +921,46 @@
       if (target > new Date(now.getFullYear(), now.getMonth(), 1)) return;
       monthOffset += dir;
       render();
+    }
+
+    function renderWeekly() {
+      const now    = new Date();
+      const dow    = now.getDay(); // 0=Sun
+      // Week starts Monday
+      const monday = new Date(now);
+      monday.setDate(now.getDate() - ((dow + 6) % 7));
+
+      let weekSpent = 0, daysActive = 0;
+      const weekBudget = DAILY * 7;
+
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(monday);
+        d.setDate(monday.getDate() + i);
+        const k = d.toISOString().slice(0, 10);
+        if (data[k]) {
+          const ds = data[k].spent.reduce((s, t) => s + t.amount, 0);
+          weekSpent += ds;
+          if (ds > 0) daysActive++;
+        }
+      }
+
+      const weekRemaining = Math.max(0, weekBudget - weekSpent);
+      const avgPerDay     = daysActive > 0 ? weekSpent / daysActive : 0;
+      const saved         = Math.max(0, weekBudget - weekSpent);
+      const pct           = Math.min(100, weekBudget > 0 ? (weekSpent / weekBudget) * 100 : 0);
+
+      document.getElementById('week-spent').textContent     = fmt(weekSpent);
+      document.getElementById('week-budget').textContent    = fmt(weekBudget);
+      document.getElementById('week-remaining').textContent = fmt(weekRemaining);
+      document.getElementById('week-remaining').style.color = weekRemaining > 0 ? 'var(--green)' : 'var(--red)';
+      document.getElementById('week-days-active').textContent = daysActive;
+      document.getElementById('week-avg').textContent       = fmt(avgPerDay);
+      document.getElementById('week-saved').textContent     = fmt(saved);
+      document.getElementById('week-saved').style.color     = saved > 0 ? 'var(--green)' : 'var(--muted)';
+
+      const bar = document.getElementById('week-progress');
+      bar.style.width      = pct + '%';
+      bar.style.background = pct < 60 ? 'var(--green)' : pct < 90 ? 'var(--yellow)' : 'var(--red)';
     }
 
     function renderMonth() {
@@ -858,6 +1013,25 @@
       const bar = document.getElementById('month-progress');
       bar.style.width = pct + '%';
       bar.style.background = pct < 60 ? 'var(--green)' : pct < 90 ? 'var(--yellow)' : 'var(--red)';
+    }
+
+    function saveAlert() {
+      const val = parseFloat(document.getElementById('alert-input').value);
+      if (!val || val <= 0 || val > 100) { showToast('Enter a % between 1 and 100.'); return; }
+      ALERT_PCT = val;
+      store.set('budget_alert', val);
+      render();
+      showToast(`Alert set at ${val}%`);
+    }
+
+    function clearAlert() {
+      ALERT_PCT = null;
+      store.set('budget_alert', '');
+      document.getElementById('alert-input').value = '';
+      document.getElementById('alert-banner').style.display = 'none';
+      document.getElementById('btn-clear-alert').style.display = 'none';
+      document.getElementById('alert-note').textContent = 'Alert disabled.';
+      showToast('Alert disabled.');
     }
 
     function changeDay(dir) {
